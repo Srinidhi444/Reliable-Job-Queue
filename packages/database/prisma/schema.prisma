@@ -1,0 +1,73 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  DLQ
+}
+
+enum WorkerStatus {
+  ONLINE
+  OFFLINE
+}
+
+model Job {
+  id            String    @id @default(uuid())
+  queue         String
+  type          String
+  payload       Json
+  status        JobStatus @default(PENDING)
+  priority      Int       @default(0)
+  availableAt   DateTime  @default(now())
+  leaseUntil    DateTime?
+  workerId      String?
+  worker        Worker?   @relation(fields: [workerId], references: [id])
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(3)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  attemptsHistory JobAttempt[]
+
+  @@index([status, availableAt])
+  @@index([workerId])
+  @@index([queue])
+}
+
+model Worker {
+  id             String        @id @default(uuid())
+  hostname       String
+  status         WorkerStatus  @default(ONLINE)
+  lastHeartbeat  DateTime      @default(now())
+  startedAt      DateTime      @default(now())
+  jobs           Job[]
+  attempts       JobAttempt[]
+}
+
+model JobAttempt {
+  id             String      @id @default(uuid())
+  jobId          String
+  job            Job         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  workerId       String?
+  worker         Worker?     @relation(fields: [workerId], references: [id])
+  attemptNumber  Int
+  status         JobStatus
+  error          String?
+  startedAt      DateTime    @default(now())
+  finishedAt     DateTime?
+  @@index([jobId])
+  @@index([workerId])
+}
