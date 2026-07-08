@@ -1,34 +1,93 @@
-import type { Job } from "@reliable-job-queue/shared";
+import os from "node:os";
 
-import { JobRepository } from "@reliable-job-queue/database";
+import type { Job } from "@reliable-job-queue/shared";
+import {
+  JobRepository,
+  WorkerRepository,
+} from "@reliable-job-queue/database";
+
 import { JobExecutor } from "./JobExecutor";
 
 export class WorkerRuntime {
   private running = false;
 
+  private heartbeatTimer?: NodeJS.Timeout;
+
   constructor(
     private readonly repository: JobRepository,
+    private readonly workerRepository: WorkerRepository,
     private readonly executor: JobExecutor,
     private readonly workerId: string,
-    private readonly pollingInterval = 1000
+    private readonly pollingInterval = 1000,
+    private readonly heartbeatInterval = 10_000
   ) {}
 
   public async start(): Promise<void> {
+    if (this.running) {
+      throw new Error("Worker is already running.");
+    }
+
     this.running = true;
+
+    await this.workerRepository.register({
+      id: this.workerId,
+      hostname: os.hostname(),
+    });
+
+    this.startHeartbeat();
 
     console.log(`Worker ${this.workerId} started.`);
 
     while (this.running) {
-      await this.poll();
+      try {
+        await this.poll();
+      } catch (error) {
+        console.error(
+          `Worker ${this.workerId} polling failed:`,
+          error
+        );
+      }
 
       await this.sleep(this.pollingInterval);
     }
   }
 
-  public stop(): void {
+  public async stop(): Promise<void> {
+    if (!this.running) {
+      return;
+    }
+
     this.running = false;
 
+    this.stopHeartbeat();
+
+    await this.workerRepository.markOffline(this.workerId);
+
     console.log(`Worker ${this.workerId} stopped.`);
+  }
+
+  private startHeartbeat(): void {
+    this.heartbeatTimer = setInterval(async () => {
+      try {
+        await this.workerRepository.heartbeat(this.workerId);
+      } catch (error) {
+        console.error(
+          `Heartbeat failed for worker ${this.workerId}:`,
+          error
+        );
+      }
+    }, this.heartbeatInterval);
+
+    this.heartbeatTimer.unref();
+  }
+
+  private stopHeartbeat(): void {
+    if (!this.heartbeatTimer) {
+      return;
+    }
+
+    clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = undefined;
   }
 
   private async poll(): Promise<void> {
@@ -53,11 +112,10 @@ export class WorkerRuntime {
       await this.executor.execute(job);
 
       await this.repository.completeJob(job.id);
+
+      console.log(`Completed job ${job.id}`);
     } catch (error) {
-      console.error(
-        `Job ${job.id} failed:`,
-        error
-      );
+      console.error(`Job ${job.id} failed:`, error);
 
       await this.repository.failJob(job.id);
     }
