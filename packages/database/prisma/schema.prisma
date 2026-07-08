@@ -34,7 +34,6 @@ model Job {
   availableAt   DateTime  @default(now())
   leaseUntil    DateTime?
   workerId      String?
-  worker        Worker?   @relation(fields: [workerId], references: [id])
   attempts      Int       @default(0)
   maxAttempts   Int       @default(3)
   createdAt     DateTime  @default(now())
@@ -52,8 +51,6 @@ model Worker {
   status         WorkerStatus  @default(ONLINE)
   lastHeartbeat  DateTime      @default(now())
   startedAt      DateTime      @default(now())
-  jobs           Job[]
-  attempts       JobAttempt[]
 }
 
 model JobAttempt {
@@ -61,7 +58,6 @@ model JobAttempt {
   jobId          String
   job            Job         @relation(fields: [jobId], references: [id], onDelete: Cascade)
   workerId       String?
-  worker         Worker?     @relation(fields: [workerId], references: [id])
   attemptNumber  Int
   status         JobStatus
   error          String?
