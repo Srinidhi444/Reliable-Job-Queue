@@ -1,4 +1,4 @@
-import type { Job } from "@prisma/client";
+import type { Job } from "@reliable-job-queue/shared";
 
 import { JobRepository } from "@reliable-job-queue/database";
 import { JobExecutor } from "./JobExecutor";
