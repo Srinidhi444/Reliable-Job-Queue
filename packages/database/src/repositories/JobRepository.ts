@@ -80,6 +80,9 @@ export class JobRepository {
         id: jobId,
         status: JobStatus.PENDING,
         leaseUntil: null,
+        availableAt: {
+          lte: new Date(),
+        },
       },
       data: {
         status: JobStatus.PROCESSING,
@@ -123,4 +126,54 @@ export class JobRepository {
       },
     });
   }
+
+  async extendLease(
+  jobId: string,
+  workerId: string,
+  leaseDurationMs: number
+): Promise<boolean> {
+  const leaseUntil = new Date(Date.now() + leaseDurationMs);
+
+  const result = await prisma.job.updateMany({
+    where: {
+      id: jobId,
+      workerId,
+      status: JobStatus.PROCESSING,
+    },
+    data: {
+      leaseUntil,
+    },
+  });
+
+  return result.count === 1;
+}
+
+async releaseLease(jobId: string): Promise<Job> {
+  return prisma.job.update({
+    where: {
+      id: jobId,
+    },
+    data: {
+      status: JobStatus.PENDING,
+      workerId: null,
+      leaseUntil: null,
+    },
+  });
+}
+
+async findExpiredLeases(): Promise<Job[]> {
+  const now = new Date();
+
+  return prisma.job.findMany({
+    where: {
+      status: JobStatus.PROCESSING,
+      leaseUntil: {
+        lt: now,
+      },
+    },
+    orderBy: {
+      leaseUntil: "asc",
+    },
+  });
+}
 }
