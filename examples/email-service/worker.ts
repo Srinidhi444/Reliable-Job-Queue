@@ -13,6 +13,30 @@ import { LeaseManager } from "../../packages/core/src/lease/LeaseManager";
 import type { WorkerContext } from "../../packages/core/src/worker/WorkerContext";
 import type { WorkerOptions } from "../../packages/core/src/types/WorkerOptions";
 
+const TEST_MODE =
+  "LEASE_EXPIRE" as
+    | "NORMAL"
+    | "LONG_RUNNING"
+    | "LEASE_EXPIRE"
+    | "CRASH";
+
+// -----------------------------
+// NORMAL
+// lease = 30 sec
+// job = 0 sec
+//
+// LONG_RUNNING
+// lease = 30 sec
+// job = 15 sec
+//
+// LEASE_EXPIRE
+// lease = 5 sec
+// job = 10 sec
+//
+// CRASH
+// worker exits while processing
+// -----------------------------
+
 async function main() {
   const workerId = crypto.randomUUID();
 
@@ -23,7 +47,10 @@ async function main() {
   const options: WorkerOptions = {
     pollingInterval: 1000,
     heartbeatInterval: 10000,
-    leaseDuration: 30000,
+    leaseDuration:
+      TEST_MODE === "LEASE_EXPIRE"
+        ? 10000
+        : 30000,
   };
 
   const jobRepository = new JobRepository();
@@ -38,10 +65,43 @@ async function main() {
   const registry = new HandlerRegistry();
 
   registry.register("send-email", async (job) => {
-    console.log("================================");
-    console.log("📧 Sending Email");
+    console.log("==================================");
+    console.log(`Worker: ${workerId}`);
+    console.log(`Mode  : ${TEST_MODE}`);
+    console.log(`Job Started: ${job.id}`);
     console.log(job.payload);
-    console.log("================================");
+    console.log("==================================");
+
+    switch (TEST_MODE) {
+      case "NORMAL":
+        break;
+
+      case "LONG_RUNNING":
+        console.log("Lease should expire around:", new Date(Date.now() + options.leaseDuration!).toISOString());
+console.log("Current time:", new Date().toISOString());
+        await sleep(60_000);
+        break;
+
+      case "LEASE_EXPIRE":
+        console.log(
+          "Sleeping 10 seconds (lease is only 5 seconds)..."
+        );
+
+        await sleep(120_000);
+
+        break;
+
+      case "CRASH":
+        console.log(
+          "Simulating worker crash in 3 seconds..."
+        );
+
+        await sleep(3000);
+
+        process.exit(1);
+    }
+
+    console.log("Job Finished");
   });
 
   const executor = new JobExecutor(
@@ -75,6 +135,12 @@ async function main() {
   });
 
   await worker.start();
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 main().catch(console.error);
