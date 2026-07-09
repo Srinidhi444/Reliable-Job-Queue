@@ -7,7 +7,8 @@ import {
 } from "@reliable-job-queue/database";
 
 import { JobExecutor } from "./JobExecutor";
-
+import { LeaseManager } from "../lease/LeaseManager";
+import { WorkerOptions } from "../types/WorkerOptions";
 export class WorkerRuntime {
   private running = false;
 
@@ -16,10 +17,10 @@ export class WorkerRuntime {
   constructor(
     private readonly repository: JobRepository,
     private readonly workerRepository: WorkerRepository,
+    private readonly leaseManager: LeaseManager,
     private readonly executor: JobExecutor,
     private readonly workerId: string,
-    private readonly pollingInterval = 1000,
-    private readonly heartbeatInterval = 10_000
+    private readonly options: WorkerOptions
   ) {}
 
   public async start(): Promise<void> {
@@ -48,7 +49,7 @@ export class WorkerRuntime {
         );
       }
 
-      await this.sleep(this.pollingInterval);
+      await this.sleep(this.options.pollingInterval ?? 1000);
     }
   }
 
@@ -76,7 +77,7 @@ export class WorkerRuntime {
           error
         );
       }
-    }, this.heartbeatInterval);
+    }, this.options.heartbeatInterval ?? 10000);
 
     this.heartbeatTimer.unref();
   }
@@ -99,7 +100,7 @@ export class WorkerRuntime {
   }
 
   private async processJob(job: Job): Promise<void> {
-    const claimed = await this.repository.claimJob(
+   const claimed = await this.leaseManager.claimLease(
       job.id,
       this.workerId
     );
