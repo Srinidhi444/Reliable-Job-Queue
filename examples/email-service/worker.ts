@@ -14,7 +14,7 @@ import type { WorkerContext } from "../../packages/core/src/worker/WorkerContext
 import type { WorkerOptions } from "../../packages/core/src/types/WorkerOptions";
 
 const TEST_MODE =
-  "LONG_RUNNING" as
+  "NORMAL" as
     | "NORMAL"
     | "LONG_RUNNING"
     | "LEASE_EXPIRE"
