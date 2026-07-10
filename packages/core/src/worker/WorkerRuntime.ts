@@ -8,11 +8,17 @@ import {
 
 import { JobExecutor } from "./JobExecutor";
 import { LeaseManager } from "../lease/LeaseManager";
+import { HeartbeatManager } from "../lease/HeartbeatManager";
 import { WorkerOptions } from "../types/WorkerOptions";
+
 export class WorkerRuntime {
   private running = false;
 
-  private heartbeatTimer?: NodeJS.Timeout;
+  // Worker heartbeat (updates Worker table)
+  private workerHeartbeatTimer?: NodeJS.Timeout;
+
+  // Job heartbeat (renews job leases)
+  private readonly heartbeatManager: HeartbeatManager;
 
   constructor(
     private readonly repository: JobRepository,
@@ -21,7 +27,13 @@ export class WorkerRuntime {
     private readonly executor: JobExecutor,
     private readonly workerId: string,
     private readonly options: WorkerOptions
-  ) {}
+  ) {
+    this.heartbeatManager = new HeartbeatManager(
+      this.leaseManager,
+      this.workerId,
+      this.options.heartbeatInterval ?? 10_000
+    );
+  }
 
   public async start(): Promise<void> {
     if (this.running) {
@@ -35,7 +47,7 @@ export class WorkerRuntime {
       hostname: os.hostname(),
     });
 
-    this.startHeartbeat();
+    this.startWorkerHeartbeat();
 
     console.log(`Worker ${this.workerId} started.`);
 
@@ -60,36 +72,46 @@ export class WorkerRuntime {
 
     this.running = false;
 
-    this.stopHeartbeat();
+    this.stopWorkerHeartbeat();
+
+    this.heartbeatManager.stopAll();
 
     await this.workerRepository.markOffline(this.workerId);
 
     console.log(`Worker ${this.workerId} stopped.`);
   }
 
-  private startHeartbeat(): void {
-    this.heartbeatTimer = setInterval(async () => {
+  // ------------------------
+  // Worker heartbeat
+  // ------------------------
+
+  private startWorkerHeartbeat(): void {
+    this.workerHeartbeatTimer = setInterval(async () => {
       try {
         await this.workerRepository.heartbeat(this.workerId);
       } catch (error) {
         console.error(
-          `Heartbeat failed for worker ${this.workerId}:`,
+          `Worker heartbeat failed for ${this.workerId}:`,
           error
         );
       }
-    }, this.options.heartbeatInterval ?? 10000);
+    }, this.options.heartbeatInterval ?? 10_000);
 
-    this.heartbeatTimer.unref();
+    this.workerHeartbeatTimer.unref();
   }
 
-  private stopHeartbeat(): void {
-    if (!this.heartbeatTimer) {
+  private stopWorkerHeartbeat(): void {
+    if (!this.workerHeartbeatTimer) {
       return;
     }
 
-    clearInterval(this.heartbeatTimer);
-    this.heartbeatTimer = undefined;
+    clearInterval(this.workerHeartbeatTimer);
+    this.workerHeartbeatTimer = undefined;
   }
+
+  // ------------------------
+  // Polling
+  // ------------------------
 
   private async poll(): Promise<void> {
     const jobs = await this.repository.findAvailableJobs();
@@ -100,7 +122,7 @@ export class WorkerRuntime {
   }
 
   private async processJob(job: Job): Promise<void> {
-   const claimed = await this.leaseManager.claimLease(
+    const claimed = await this.leaseManager.claimLease(
       job.id,
       this.workerId
     );
@@ -108,6 +130,8 @@ export class WorkerRuntime {
     if (!claimed) {
       return;
     }
+
+    this.heartbeatManager.start(job.id);
 
     try {
       await this.executor.execute(job);
@@ -119,6 +143,8 @@ export class WorkerRuntime {
       console.error(`Job ${job.id} failed:`, error);
 
       await this.repository.failJob(job.id);
+    } finally {
+      this.heartbeatManager.stop(job.id);
     }
   }
 

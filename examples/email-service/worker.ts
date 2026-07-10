@@ -14,7 +14,7 @@ import type { WorkerContext } from "../../packages/core/src/worker/WorkerContext
 import type { WorkerOptions } from "../../packages/core/src/types/WorkerOptions";
 
 const TEST_MODE =
-  "LEASE_EXPIRE" as
+  "LONG_RUNNING" as
     | "NORMAL"
     | "LONG_RUNNING"
     | "LEASE_EXPIRE"
@@ -45,13 +45,10 @@ async function main() {
   };
 
   const options: WorkerOptions = {
-    pollingInterval: 1000,
-    heartbeatInterval: 10000,
-    leaseDuration:
-      TEST_MODE === "LEASE_EXPIRE"
-        ? 10000
-        : 30000,
-  };
+  pollingInterval: 1000,
+  heartbeatInterval: 3000,
+  leaseDuration: 10000,
+};
 
   const jobRepository = new JobRepository();
 
