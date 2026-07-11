@@ -10,6 +10,7 @@ import { JobExecutor } from "./JobExecutor";
 import { LeaseManager } from "../lease/LeaseManager";
 import { HeartbeatManager } from "../lease/HeartbeatManager";
 import { WorkerOptions } from "../types/WorkerOptions";
+import { RetryStrategy } from "@reliable-job-queue/shared";
 
 export class WorkerRuntime {
   private running = false;
@@ -26,7 +27,8 @@ export class WorkerRuntime {
     private readonly leaseManager: LeaseManager,
     private readonly executor: JobExecutor,
     private readonly workerId: string,
-    private readonly options: WorkerOptions
+    private readonly options: WorkerOptions,
+    private readonly retryStrategy: RetryStrategy
   ) {
     this.heartbeatManager = new HeartbeatManager(
       this.leaseManager,
@@ -139,13 +141,26 @@ export class WorkerRuntime {
       await this.repository.completeJob(job.id);
 
       console.log(`Completed job ${job.id}`);
-    } catch (error) {
-      console.error(`Job ${job.id} failed:`, error);
+    }catch (error) {
+  console.error(`Job ${job.id} failed:`, error);
 
-      await this.repository.failJob(job.id);
-    } finally {
-      this.heartbeatManager.stop(job.id);
-    }
+  const updatedJob = await this.repository.retryJob(
+    job.id,
+    this.retryStrategy
+  );
+
+  if (updatedJob.status === "FAILED") {
+    console.log(
+      `Job ${job.id} permanently failed after ${updatedJob.attempts} attempts.`
+    );
+  } else {
+    console.log(
+      `Job ${job.id} scheduled for retry #${updatedJob.attempts} at ${updatedJob.availableAt.toISOString()}`
+    );
+  }
+} finally {
+  this.heartbeatManager.stop(job.id);
+}
   }
 
   private sleep(ms: number): Promise<void> {

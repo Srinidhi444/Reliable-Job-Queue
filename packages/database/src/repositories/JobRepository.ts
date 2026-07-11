@@ -1,6 +1,6 @@
 import { prisma } from "../client";
 import { Job, JobStatus, Prisma } from "@prisma/client";
-
+import { RetryStrategy } from "@reliable-job-queue/shared/";
 export interface CreateJobInput {
   queue: string;
   type: string;
@@ -173,6 +173,53 @@ async findExpiredLeases(): Promise<Job[]> {
     },
     orderBy: {
       leaseUntil: "asc",
+    },
+  });
+}
+
+
+  async retryJob(
+  jobId: string,
+  retryStrategy: RetryStrategy
+): Promise<Job> {
+  const job = await prisma.job.findUnique({
+    where: {
+      id: jobId,
+    },
+  });
+
+  if (!job) {
+    throw new Error(`Job ${jobId} not found.`);
+  }
+
+  const attempts = job.attempts + 1;
+
+  if (attempts >= job.maxAttempts) {
+    return prisma.job.update({
+      where: {
+        id: jobId,
+      },
+      data: {
+        attempts,
+        status: JobStatus.FAILED,
+        workerId: null,
+        leaseUntil: null,
+      },
+    });
+  }
+
+  const delay = retryStrategy.getDelay(attempts);
+
+  return prisma.job.update({
+    where: {
+      id: jobId,
+    },
+    data: {
+      attempts,
+      status: JobStatus.PENDING,
+      workerId: null,
+      leaseUntil: null,
+      availableAt: new Date(Date.now() + delay),
     },
   });
 }
