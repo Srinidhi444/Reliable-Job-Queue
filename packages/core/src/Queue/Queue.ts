@@ -14,13 +14,15 @@ import { ExponentialBackoffStrategy } from "../retry/ExponentialBackoffStrategy"
 
 import { QueueOptions } from "../types/QueueOptions";
 import { WorkerOptions } from "../types/WorkerOptions";
-
-import type { RetryStrategy } from "@reliable-job-queue/shared";
-import type { Prisma } from "@prisma/client";
 import { EnqueueJobInput } from "../types/EnqueueJobInput";
 
 import { EventBus } from "../events/EventBus";
 import { QueueEvent } from "../events/QueueEvents";
+
+import { MetricsCollector } from "../metrics/MetricsCollector";
+import { MetricsSnapshot } from "../metrics/MetricSnapshot";
+
+import type { RetryStrategy } from "@reliable-job-queue/shared";
 
 export class Queue {
   private readonly jobRepository: JobRepository;
@@ -28,10 +30,14 @@ export class Queue {
   private readonly handlerRegistry: HandlerRegistry;
 
   /**
-   * Single shared event bus for the entire queue instance.
-   * Injected into WorkerRuntime, RecoveryManager, SchedulerRuntime, etc.
+   * Shared event bus for this queue instance.
    */
   private readonly eventBus: EventBus;
+
+  /**
+   * Runtime metrics collector.
+   */
+  private readonly metricsCollector: MetricsCollector;
 
   private readonly workerId: string;
   private readonly workerOptions: WorkerOptions;
@@ -43,18 +49,28 @@ export class Queue {
     this.jobRepository = new JobRepository();
     this.workerRepository = new WorkerRepository();
     this.handlerRegistry = new HandlerRegistry();
+
     this.eventBus = new EventBus();
 
-    this.workerId = options.workerId ?? crypto.randomUUID();
+    this.metricsCollector = new MetricsCollector(
+      this.eventBus
+    );
 
-    this.workerOptions = options.worker ?? {};
+    this.metricsCollector.start();
+
+    this.workerId =
+      options.workerId ?? crypto.randomUUID();
+
+    this.workerOptions =
+      options.worker ?? {};
 
     this.retryStrategy =
-      options.retryStrategy ?? new ExponentialBackoffStrategy();
+      options.retryStrategy ??
+      new ExponentialBackoffStrategy();
   }
 
   /**
-   * Register a job handler.
+   * Register a handler.
    */
   register(
     type: string,
@@ -64,7 +80,7 @@ export class Queue {
   }
 
   /**
-   * Subscribe to a queue event.
+   * Subscribe to queue events.
    */
   public on<T>(
     event: QueueEvent,
@@ -74,7 +90,7 @@ export class Queue {
   }
 
   /**
-   * Unsubscribe from a queue event.
+   * Remove an event listener.
    */
   public off<T>(
     event: QueueEvent,
@@ -90,7 +106,9 @@ export class Queue {
     const availableAt =
       input.options?.runAt ??
       (input.options?.delay
-        ? new Date(Date.now() + input.options.delay)
+        ? new Date(
+            Date.now() + input.options.delay
+          )
         : new Date());
 
     return this.jobRepository.createJob({
@@ -98,7 +116,8 @@ export class Queue {
       type: input.type,
       payload: input.payload,
       priority: input.options?.priority,
-      maxAttempts: input.options?.maxAttempts,
+      maxAttempts:
+        input.options?.maxAttempts,
       availableAt,
     });
   }
@@ -108,34 +127,43 @@ export class Queue {
    */
   async startWorker(): Promise<void> {
     if (this.workerRuntime) {
-      throw new Error("Worker is already running.");
+      throw new Error(
+        "Worker is already running."
+      );
     }
 
-    const leaseManager = new LeaseManager(
-      this.jobRepository,
-      this.workerOptions.leaseDuration ?? 30_000
-    );
+    const leaseManager =
+      new LeaseManager(
+        this.jobRepository,
+        this.workerOptions
+          .leaseDuration ?? 30_000
+      );
 
-    const executor = new JobExecutor(this.handlerRegistry, {
-      workerId: this.workerId,
-    });
+    const executor =
+      new JobExecutor(
+        this.handlerRegistry,
+        {
+          workerId: this.workerId,
+        }
+      );
 
-    this.workerRuntime = new WorkerRuntime(
-      this.jobRepository,
-      this.workerRepository,
-      leaseManager,
-      executor,
-      this.workerId,
-      this.workerOptions,
-      this.retryStrategy,
-      this.eventBus
-    );
+    this.workerRuntime =
+      new WorkerRuntime(
+        this.jobRepository,
+        this.workerRepository,
+        leaseManager,
+        executor,
+        this.workerId,
+        this.workerOptions,
+        this.retryStrategy,
+        this.eventBus
+      );
 
     await this.workerRuntime.start();
   }
 
   /**
-   * Stops the running worker.
+   * Stops the worker.
    */
   async stopWorker(): Promise<void> {
     if (!this.workerRuntime) {
@@ -143,12 +171,51 @@ export class Queue {
     }
 
     await this.workerRuntime.stop();
+
     this.workerRuntime = undefined;
   }
 
-  // -----------------------------
+  /**
+   * Runtime metrics.
+   */
+  public metrics(): MetricsSnapshot {
+    return this.metricsCollector.getSnapshot();
+  }
+
+  /**
+   * Queue statistics.
+   *
+   * Pending
+   * Processing
+   * Completed
+   * Failed
+   * DLQ
+   */
+  public async stats() {
+    return this.jobRepository.getQueueStats();
+  }
+
+  /**
+   * Returns all jobs currently
+   * in the Dead Letter Queue.
+   */
+  public async getDLQ() {
+    return this.jobRepository.getDLQJobs();
+  }
+
+  /**
+   * Replay a DLQ job.
+   *
+   * The job is reset back to
+   * PENDING with attempts = 0.
+   */
+  public async replay(jobId: string) {
+    return this.jobRepository.replayDLQJob(jobId);
+  }
+
+  // -------------------------------------------------
   // Internal getters
-  // -----------------------------
+  // -------------------------------------------------
 
   getJobRepository(): JobRepository {
     return this.jobRepository;
@@ -176,5 +243,9 @@ export class Queue {
 
   getEventBus(): EventBus {
     return this.eventBus;
+  }
+
+  getMetricsCollector(): MetricsCollector {
+    return this.metricsCollector;
   }
 }

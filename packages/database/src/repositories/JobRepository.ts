@@ -228,4 +228,97 @@ async findExpiredLeases(): Promise<Job[]> {
     },
   });
 }
+/**
+ * Returns queue statistics.
+ */
+async getQueueStats() {
+  const [
+    pending,
+    processing,
+    completed,
+    failed,
+    dlq,
+  ] = await Promise.all([
+    prisma.job.count({
+      where: {
+        status: JobStatus.PENDING,
+      },
+    }),
+
+    prisma.job.count({
+      where: {
+        status: JobStatus.PROCESSING,
+      },
+    }),
+
+    prisma.job.count({
+      where: {
+        status: JobStatus.COMPLETED,
+      },
+    }),
+
+    prisma.job.count({
+      where: {
+        status: JobStatus.FAILED,
+      },
+    }),
+
+    prisma.job.count({
+      where: {
+        status: JobStatus.DLQ,
+      },
+    }),
+  ]);
+
+  return {
+    pending,
+    processing,
+    completed,
+    failed,
+    dlq,
+    total:
+      pending +
+      processing +
+      completed +
+      failed +
+      dlq,
+  };
+}
+
+/**
+ * Returns all jobs currently
+ * in the Dead Letter Queue.
+ */
+async getDLQJobs(): Promise<Job[]> {
+  return prisma.job.findMany({
+    where: {
+      status: JobStatus.DLQ,
+    },
+    orderBy: {
+      failedAt: "desc",
+    },
+  });
+}
+
+/**
+ * Replay a Dead Letter Queue job.
+ */
+async replayDLQJob(
+  jobId: string
+): Promise<Job> {
+  return prisma.job.update({
+    where: {
+      id: jobId,
+    },
+    data: {
+      status: JobStatus.PENDING,
+      attempts: 0,
+      workerId: null,
+      leaseUntil: null,
+      failedAt: null,
+      lastError: null,
+      availableAt: new Date(),
+    },
+  });
+}
 }

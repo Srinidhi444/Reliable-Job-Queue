@@ -1,8 +1,9 @@
+import { QueueEvent } from "../../packages/core/src/events/QueueEvents";
 import { Queue } from "../../packages/core/src/queue/Queue";
 import type { WorkerOptions } from "../../packages/core/src/types/WorkerOptions";
 
 const TEST_MODE =
-  "LONG_RUNNING" as
+  "NORMAL" as
     | "NORMAL"
     | "LONG_RUNNING"
     | "LEASE_EXPIRE"
@@ -14,7 +15,7 @@ async function main() {
     pollingInterval: 1000,
     heartbeatInterval: 3000,
     leaseDuration: 10000,
-
+    
     // Test concurrency
     concurrency: 3,
   };
@@ -22,6 +23,35 @@ async function main() {
   const queue = new Queue({
     worker: options,
   });
+  // console.log(await queue.stats());
+  // console.log(queue.metrics());
+  queue.on(
+    QueueEvent.JOB_STARTED,
+    console.log
+);
+
+queue.on(
+    QueueEvent.JOB_COMPLETED,
+    console.log
+);
+
+queue.on(
+    QueueEvent.JOB_FAILED,
+    console.log
+);
+  // await queue.replay("f69f707f-4c6c-404f-9d16-da158418ffbe");
+//   await queue.enqueue({
+//   queue: "emails",
+//   type: "send-email",
+//   payload: {
+//     to: "john@example.com",
+//     subject: "Welcome",
+//     body: "Hello",
+//   },
+//   options: {
+//     delay: 30_000, // 30 seconds
+//   },
+// });
 
   queue.register("send-email", async (job) => {
     console.log("==================================");

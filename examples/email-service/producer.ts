@@ -6,11 +6,12 @@ async function main() {
   const job = await repository.createJob({
     queue: "emails",
     type: "send-email",
+    priority:1,
     payload: {
       to: "john@example.com",
-      subject: "Welcome to Reliable Job Queue",
+      subject: "Welcome to the testing",
       body: "Hello from our queue!"
-    }
+    },
   });
 
   console.log("Job created:");
