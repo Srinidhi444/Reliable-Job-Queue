@@ -11,6 +11,13 @@ import { LeaseManager } from "../lease/LeaseManager";
 import { HeartbeatManager } from "../lease/HeartbeatManager";
 import { WorkerOptions } from "../types/WorkerOptions";
 
+export interface StopOptions {
+  /**
+   * Max time (ms) to wait for active jobs to finish before forcing shutdown.
+   */
+  timeout?: number;
+}
+
 export class WorkerRuntime {
   private running = false;
 
@@ -28,6 +35,13 @@ export class WorkerRuntime {
    * Renews leases for running jobs.
    */
   private readonly heartbeatManager: HeartbeatManager;
+
+  /**
+   * Resolves once all active jobs have finished during shutdown.
+   */
+  private shutdownResolver?: () => void;
+
+  private shutdownPromise?: Promise<void>;
 
   constructor(
     private readonly repository: JobRepository,
@@ -75,20 +89,71 @@ export class WorkerRuntime {
     }
   }
 
-  public async stop(): Promise<void> {
+  public async stop(options: StopOptions = {}): Promise<void> {
     if (!this.running) {
       return;
     }
 
+    console.log(
+      `Worker ${this.workerId} is shutting down gracefully...`
+    );
+
+    // Stop polling for new jobs
     this.running = false;
 
+    // Stop worker heartbeat
     this.stopWorkerHeartbeat();
 
+    // If jobs are still running, wait for them (with optional timeout)
+    if (this.activeJobs > 0) {
+      console.log(
+        `Waiting for ${this.activeJobs} running job(s) to finish...`
+      );
+
+      this.shutdownPromise = new Promise<void>((resolve) => {
+        this.shutdownResolver = resolve;
+      });
+
+      const timeout = options.timeout;
+
+      if (timeout && timeout > 0) {
+        await this.waitWithTimeout(this.shutdownPromise, timeout);
+      } else {
+        await this.shutdownPromise;
+      }
+    }
+
+    // Stop all job heartbeats
     this.heartbeatManager.stopAll();
 
     await this.workerRepository.markOffline(this.workerId);
 
     console.log(`Worker ${this.workerId} stopped.`);
+  }
+
+  private async waitWithTimeout(
+    promise: Promise<void>,
+    timeoutMs: number
+  ): Promise<void> {
+    let timer: NodeJS.Timeout | undefined;
+
+    const timeoutPromise = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        console.warn(
+          `Worker ${this.workerId} shutdown timed out after ${timeoutMs}ms. ` +
+            `${this.activeJobs} job(s) still running — forcing shutdown.`
+        );
+        resolve();
+      }, timeoutMs);
+    });
+
+    try {
+      await Promise.race([promise, timeoutPromise]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
   }
 
   // ----------------------------------------------------
@@ -124,38 +189,34 @@ export class WorkerRuntime {
   // ----------------------------------------------------
 
   private async poll(): Promise<void> {
-    const concurrency =
-      this.options.concurrency ?? 1;
+    const concurrency = this.options.concurrency ?? 1;
 
-    const availableSlots =
-      concurrency - this.activeJobs;
+    const availableSlots = concurrency - this.activeJobs;
 
     if (availableSlots <= 0) {
       return;
     }
 
-    const jobs =
-      await this.repository.findAvailableJobs(
-        availableSlots
-      );
+    const jobs = await this.repository.findAvailableJobs(
+      availableSlots
+    );
 
     for (const job of jobs) {
       this.activeJobs++;
 
-      void this.processJob(job).finally(() => {
-        this.activeJobs--;
-      });
+      void this.processJob(job);
     }
   }
 
   private async processJob(job: Job): Promise<void> {
-    const claimed =
-      await this.leaseManager.claimLease(
-        job.id,
-        this.workerId
-      );
+    const claimed = await this.leaseManager.claimLease(
+      job.id,
+      this.workerId
+    );
 
     if (!claimed) {
+      this.activeJobs--;
+      this.checkShutdownComplete();
       return;
     }
 
@@ -168,22 +229,16 @@ export class WorkerRuntime {
 
       console.log(`Completed job ${job.id}`);
     } catch (error) {
-      console.error(
-        `Job ${job.id} failed:`,
-        error
-      );
+      console.error(`Job ${job.id} failed:`, error);
 
       const errorMessage =
-        error instanceof Error
-          ? error.message
-          : String(error);
+        error instanceof Error ? error.message : String(error);
 
-      const updatedJob =
-        await this.repository.retryJob(
-          job.id,
-          this.retryStrategy,
-          errorMessage
-        );
+      const updatedJob = await this.repository.retryJob(
+        job.id,
+        this.retryStrategy,
+        errorMessage
+      );
 
       if (updatedJob.status === "DLQ") {
         console.log(
@@ -196,6 +251,16 @@ export class WorkerRuntime {
       }
     } finally {
       this.heartbeatManager.stop(job.id);
+
+      this.activeJobs--;
+
+      this.checkShutdownComplete();
+    }
+  }
+
+  private checkShutdownComplete(): void {
+    if (!this.running && this.activeJobs === 0) {
+      this.shutdownResolver?.();
     }
   }
 
