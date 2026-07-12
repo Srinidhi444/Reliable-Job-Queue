@@ -30,6 +30,8 @@ model Job {
   type          String
   payload       Json
   status        JobStatus @default(PENDING)
+  lastError String?
+  failedAt DateTime?
   priority      Int       @default(0)
   availableAt   DateTime  @default(now())
   leaseUntil    DateTime?

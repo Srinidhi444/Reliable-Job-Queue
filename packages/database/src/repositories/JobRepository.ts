@@ -178,9 +178,10 @@ async findExpiredLeases(): Promise<Job[]> {
 }
 
 
-  async retryJob(
+ async retryJob(
   jobId: string,
-  retryStrategy: RetryStrategy
+  retryStrategy: RetryStrategy,
+  errorMessage: string
 ): Promise<Job> {
   const job = await prisma.job.findUnique({
     where: {
@@ -194,6 +195,7 @@ async findExpiredLeases(): Promise<Job[]> {
 
   const attempts = job.attempts + 1;
 
+  // No retries left -> move to DLQ
   if (attempts >= job.maxAttempts) {
     return prisma.job.update({
       where: {
@@ -201,9 +203,11 @@ async findExpiredLeases(): Promise<Job[]> {
       },
       data: {
         attempts,
-        status: JobStatus.FAILED,
+        status: JobStatus.DLQ,
         workerId: null,
         leaseUntil: null,
+        failedAt: new Date(),
+        lastError: errorMessage,
       },
     });
   }
@@ -220,6 +224,7 @@ async findExpiredLeases(): Promise<Job[]> {
       workerId: null,
       leaseUntil: null,
       availableAt: new Date(Date.now() + delay),
+      lastError: errorMessage,
     },
   });
 }

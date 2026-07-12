@@ -144,21 +144,27 @@ export class WorkerRuntime {
     }catch (error) {
   console.error(`Job ${job.id} failed:`, error);
 
+  const errorMessage =
+    error instanceof Error
+      ? error.message
+      : String(error);
+
   const updatedJob = await this.repository.retryJob(
     job.id,
-    this.retryStrategy
+    this.retryStrategy,
+    errorMessage
   );
 
-  if (updatedJob.status === "FAILED") {
+  if (updatedJob.status === "DLQ") {
     console.log(
-      `Job ${job.id} permanently failed after ${updatedJob.attempts} attempts.`
+      `Job ${job.id} moved to the Dead Letter Queue.`
     );
   } else {
     console.log(
-      `Job ${job.id} scheduled for retry #${updatedJob.attempts} at ${updatedJob.availableAt.toISOString()}`
+      `Retry #${updatedJob.attempts} scheduled at ${updatedJob.availableAt.toISOString()}`
     );
   }
-} finally {
+}finally {
   this.heartbeatManager.stop(job.id);
 }
   }
