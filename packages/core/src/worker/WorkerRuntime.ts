@@ -1,6 +1,6 @@
 import os from "node:os";
 
-import type { Job } from "@reliable-job-queue/shared";
+import type { Job, RetryStrategy } from "@reliable-job-queue/shared";
 import {
   JobRepository,
   WorkerRepository,
@@ -10,15 +10,23 @@ import { JobExecutor } from "./JobExecutor";
 import { LeaseManager } from "../lease/LeaseManager";
 import { HeartbeatManager } from "../lease/HeartbeatManager";
 import { WorkerOptions } from "../types/WorkerOptions";
-import { RetryStrategy } from "@reliable-job-queue/shared";
 
 export class WorkerRuntime {
   private running = false;
 
-  // Worker heartbeat (updates Worker table)
+  /**
+   * Number of jobs currently executing.
+   */
+  private activeJobs = 0;
+
+  /**
+   * Worker heartbeat timer.
+   */
   private workerHeartbeatTimer?: NodeJS.Timeout;
 
-  // Job heartbeat (renews job leases)
+  /**
+   * Renews leases for running jobs.
+   */
   private readonly heartbeatManager: HeartbeatManager;
 
   constructor(
@@ -83,9 +91,9 @@ export class WorkerRuntime {
     console.log(`Worker ${this.workerId} stopped.`);
   }
 
-  // ------------------------
+  // ----------------------------------------------------
   // Worker heartbeat
-  // ------------------------
+  // ----------------------------------------------------
 
   private startWorkerHeartbeat(): void {
     this.workerHeartbeatTimer = setInterval(async () => {
@@ -111,23 +119,41 @@ export class WorkerRuntime {
     this.workerHeartbeatTimer = undefined;
   }
 
-  // ------------------------
+  // ----------------------------------------------------
   // Polling
-  // ------------------------
+  // ----------------------------------------------------
 
   private async poll(): Promise<void> {
-    const jobs = await this.repository.findAvailableJobs();
+    const concurrency =
+      this.options.concurrency ?? 1;
+
+    const availableSlots =
+      concurrency - this.activeJobs;
+
+    if (availableSlots <= 0) {
+      return;
+    }
+
+    const jobs =
+      await this.repository.findAvailableJobs(
+        availableSlots
+      );
 
     for (const job of jobs) {
-      await this.processJob(job);
+      this.activeJobs++;
+
+      void this.processJob(job).finally(() => {
+        this.activeJobs--;
+      });
     }
   }
 
   private async processJob(job: Job): Promise<void> {
-    const claimed = await this.leaseManager.claimLease(
-      job.id,
-      this.workerId
-    );
+    const claimed =
+      await this.leaseManager.claimLease(
+        job.id,
+        this.workerId
+      );
 
     if (!claimed) {
       return;
@@ -141,32 +167,36 @@ export class WorkerRuntime {
       await this.repository.completeJob(job.id);
 
       console.log(`Completed job ${job.id}`);
-    }catch (error) {
-  console.error(`Job ${job.id} failed:`, error);
+    } catch (error) {
+      console.error(
+        `Job ${job.id} failed:`,
+        error
+      );
 
-  const errorMessage =
-    error instanceof Error
-      ? error.message
-      : String(error);
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : String(error);
 
-  const updatedJob = await this.repository.retryJob(
-    job.id,
-    this.retryStrategy,
-    errorMessage
-  );
+      const updatedJob =
+        await this.repository.retryJob(
+          job.id,
+          this.retryStrategy,
+          errorMessage
+        );
 
-  if (updatedJob.status === "DLQ") {
-    console.log(
-      `Job ${job.id} moved to the Dead Letter Queue.`
-    );
-  } else {
-    console.log(
-      `Retry #${updatedJob.attempts} scheduled at ${updatedJob.availableAt.toISOString()}`
-    );
-  }
-}finally {
-  this.heartbeatManager.stop(job.id);
-}
+      if (updatedJob.status === "DLQ") {
+        console.log(
+          `Job ${job.id} moved to the Dead Letter Queue.`
+        );
+      } else {
+        console.log(
+          `Retry #${updatedJob.attempts} scheduled at ${updatedJob.availableAt.toISOString()}`
+        );
+      }
+    } finally {
+      this.heartbeatManager.stop(job.id);
+    }
   }
 
   private sleep(ms: number): Promise<void> {
