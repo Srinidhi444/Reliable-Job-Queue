@@ -11,6 +11,9 @@ import { LeaseManager } from "../lease/LeaseManager";
 import { HeartbeatManager } from "../lease/HeartbeatManager";
 import { WorkerOptions } from "../types/WorkerOptions";
 
+import { EventBus } from "../events/EventBus";
+import { QueueEvent } from "../events/QueueEvents";
+
 export interface StopOptions {
   /**
    * Max time (ms) to wait for active jobs to finish before forcing shutdown.
@@ -50,12 +53,14 @@ export class WorkerRuntime {
     private readonly executor: JobExecutor,
     private readonly workerId: string,
     private readonly options: WorkerOptions,
-    private readonly retryStrategy: RetryStrategy
+    private readonly retryStrategy: RetryStrategy,
+    private readonly eventBus: EventBus
   ) {
     this.heartbeatManager = new HeartbeatManager(
       this.leaseManager,
       this.workerId,
-      this.options.heartbeatInterval ?? 10_000
+      this.options.heartbeatInterval ?? 10_000,
+      this.eventBus
     );
   }
 
@@ -74,6 +79,10 @@ export class WorkerRuntime {
     this.startWorkerHeartbeat();
 
     console.log(`Worker ${this.workerId} started.`);
+
+    this.eventBus.emit(QueueEvent.WORKER_STARTED, {
+      workerId: this.workerId,
+    });
 
     while (this.running) {
       try {
@@ -129,6 +138,10 @@ export class WorkerRuntime {
     await this.workerRepository.markOffline(this.workerId);
 
     console.log(`Worker ${this.workerId} stopped.`);
+
+    this.eventBus.emit(QueueEvent.WORKER_STOPPED, {
+      workerId: this.workerId,
+    });
   }
 
   private async waitWithTimeout(
@@ -220,19 +233,30 @@ export class WorkerRuntime {
       return;
     }
 
+    this.eventBus.emit(QueueEvent.JOB_CLAIMED, { job });
+
     this.heartbeatManager.start(job.id);
 
     try {
+      this.eventBus.emit(QueueEvent.JOB_STARTED, { job });
+
       await this.executor.execute(job);
 
       await this.repository.completeJob(job.id);
 
       console.log(`Completed job ${job.id}`);
+
+      this.eventBus.emit(QueueEvent.JOB_COMPLETED, { job });
     } catch (error) {
       console.error(`Job ${job.id} failed:`, error);
 
       const errorMessage =
         error instanceof Error ? error.message : String(error);
+
+      this.eventBus.emit(QueueEvent.JOB_FAILED, {
+        job,
+        error: errorMessage,
+      });
 
       const updatedJob = await this.repository.retryJob(
         job.id,
@@ -244,10 +268,18 @@ export class WorkerRuntime {
         console.log(
           `Job ${job.id} moved to the Dead Letter Queue.`
         );
+
+        this.eventBus.emit(QueueEvent.JOB_DLQ, {
+          job: updatedJob,
+        });
       } else {
         console.log(
           `Retry #${updatedJob.attempts} scheduled at ${updatedJob.availableAt.toISOString()}`
         );
+
+        this.eventBus.emit(QueueEvent.JOB_RETRY, {
+          job: updatedJob,
+        });
       }
     } finally {
       this.heartbeatManager.stop(job.id);

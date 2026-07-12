@@ -1,12 +1,16 @@
 import { LeaseManager } from "./LeaseManager";
 
+import { EventBus } from "../events/EventBus";
+import { QueueEvent } from "../events/QueueEvents";
+
 export class HeartbeatManager {
   private readonly timers = new Map<string, NodeJS.Timeout>();
 
   constructor(
     private readonly leaseManager: LeaseManager,
     private readonly workerId: string,
-    private readonly heartbeatIntervalMs: number
+    private readonly heartbeatIntervalMs: number,
+    private readonly eventBus: EventBus
   ) {}
 
   start(jobId: string): void {
@@ -21,11 +25,17 @@ export class HeartbeatManager {
           jobId,
           this.workerId
         );
+
         console.log(
-        `[Heartbeat] Job ${jobId} renewed: ${renewed} at ${new Date().toISOString()}`
+          `[Heartbeat] Job ${jobId} renewed: ${renewed} at ${new Date().toISOString()}`
         );
 
-        if (!renewed) {
+        if (renewed) {
+          this.eventBus.emit(QueueEvent.LEASE_RENEWED, {
+            jobId,
+            workerId: this.workerId,
+          });
+        } else {
           console.warn(
             `Failed to renew lease for job ${jobId}. Stopping heartbeat.`
           );
@@ -33,10 +43,7 @@ export class HeartbeatManager {
           this.stop(jobId);
         }
       } catch (error) {
-        console.error(
-          `Heartbeat failed for job ${jobId}:`,
-          error
-        );
+        console.error(`Heartbeat failed for job ${jobId}:`, error);
       }
     }, this.heartbeatIntervalMs);
 

@@ -19,10 +19,19 @@ import type { RetryStrategy } from "@reliable-job-queue/shared";
 import type { Prisma } from "@prisma/client";
 import { EnqueueJobInput } from "../types/EnqueueJobInput";
 
+import { EventBus } from "../events/EventBus";
+import { QueueEvent } from "../events/QueueEvents";
+
 export class Queue {
   private readonly jobRepository: JobRepository;
   private readonly workerRepository: WorkerRepository;
   private readonly handlerRegistry: HandlerRegistry;
+
+  /**
+   * Single shared event bus for the entire queue instance.
+   * Injected into WorkerRuntime, RecoveryManager, SchedulerRuntime, etc.
+   */
+  private readonly eventBus: EventBus;
 
   private readonly workerId: string;
   private readonly workerOptions: WorkerOptions;
@@ -34,14 +43,14 @@ export class Queue {
     this.jobRepository = new JobRepository();
     this.workerRepository = new WorkerRepository();
     this.handlerRegistry = new HandlerRegistry();
+    this.eventBus = new EventBus();
 
     this.workerId = options.workerId ?? crypto.randomUUID();
 
     this.workerOptions = options.worker ?? {};
 
     this.retryStrategy =
-      options.retryStrategy ??
-      new ExponentialBackoffStrategy();
+      options.retryStrategy ?? new ExponentialBackoffStrategy();
   }
 
   /**
@@ -55,24 +64,45 @@ export class Queue {
   }
 
   /**
+   * Subscribe to a queue event.
+   */
+  public on<T>(
+    event: QueueEvent,
+    listener: (payload: T) => void | Promise<void>
+  ): void {
+    this.eventBus.on(event, listener);
+  }
+
+  /**
+   * Unsubscribe from a queue event.
+   */
+  public off<T>(
+    event: QueueEvent,
+    listener: (payload: T) => void | Promise<void>
+  ): void {
+    this.eventBus.off(event, listener);
+  }
+
+  /**
    * Enqueue a new job.
    */
   async enqueue(input: EnqueueJobInput) {
-  const availableAt =
-    input.options?.runAt ??
-    (input.options?.delay
-      ? new Date(Date.now() + input.options.delay)
-      : new Date());
+    const availableAt =
+      input.options?.runAt ??
+      (input.options?.delay
+        ? new Date(Date.now() + input.options.delay)
+        : new Date());
 
-  return this.jobRepository.createJob({
-    queue: input.queue,
-    type: input.type,
-    payload: input.payload,
-    priority: input.options?.priority,
-    maxAttempts: input.options?.maxAttempts,
-    availableAt,
-  });
-}
+    return this.jobRepository.createJob({
+      queue: input.queue,
+      type: input.type,
+      payload: input.payload,
+      priority: input.options?.priority,
+      maxAttempts: input.options?.maxAttempts,
+      availableAt,
+    });
+  }
+
   /**
    * Starts a worker.
    */
@@ -86,12 +116,9 @@ export class Queue {
       this.workerOptions.leaseDuration ?? 30_000
     );
 
-    const executor = new JobExecutor(
-      this.handlerRegistry,
-      {
-        workerId: this.workerId,
-      }
-    );
+    const executor = new JobExecutor(this.handlerRegistry, {
+      workerId: this.workerId,
+    });
 
     this.workerRuntime = new WorkerRuntime(
       this.jobRepository,
@@ -100,7 +127,8 @@ export class Queue {
       executor,
       this.workerId,
       this.workerOptions,
-      this.retryStrategy
+      this.retryStrategy,
+      this.eventBus
     );
 
     await this.workerRuntime.start();
@@ -144,5 +172,9 @@ export class Queue {
 
   getRetryStrategy(): RetryStrategy {
     return this.retryStrategy;
+  }
+
+  getEventBus(): EventBus {
+    return this.eventBus;
   }
 }
