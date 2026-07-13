@@ -1,8 +1,5 @@
 import { LeaseManager } from "./LeaseManager";
 
-import { EventBus } from "../events/EventBus";
-import { QueueEvent } from "../events/QueueEvents";
-
 export class HeartbeatManager {
   private readonly timers = new Map<
     string,
@@ -24,7 +21,7 @@ export class HeartbeatManager {
     private readonly leaseManager: LeaseManager,
     private readonly workerId: string,
     private readonly heartbeatIntervalMs: number,
-    private readonly eventBus: EventBus
+  
   ) {}
 
   start(jobId: string): void {
@@ -58,13 +55,7 @@ export class HeartbeatManager {
           `[Heartbeat] Job ${jobId} renewed at ${new Date().toISOString()}`
         );
 
-        this.eventBus.emit(
-          QueueEvent.LEASE_RENEWED,
-          {
-            jobId,
-            workerId: this.workerId,
-          }
-        );
+        
       } catch (error) {
         const failures =
           (this.failures.get(jobId) ?? 0) + 1;

@@ -4,7 +4,6 @@ import { LeaseManager } from "../lease/LeaseManager";
 import { RecoveryManager } from "./RecoveryManager";
 import { SchedulerRuntime } from "./SchedulerRuntime";
 
-import { EventBus } from "../events/EventBus";
 
 export interface SchedulerOptions {
   /**
@@ -26,7 +25,7 @@ export interface SchedulerOptions {
 export class Scheduler {
   private readonly jobRepository: JobRepository;
   private readonly leaseManager: LeaseManager;
-  private readonly eventBus: EventBus;
+
 
   private readonly recoveryManager: RecoveryManager;
   private readonly runtime: SchedulerRuntime;
@@ -36,8 +35,6 @@ export class Scheduler {
   ) {
     this.jobRepository = new JobRepository();
 
-    this.eventBus = new EventBus();
-
     this.leaseManager = new LeaseManager(
       this.jobRepository,
       options.leaseDuration ?? 30_000
@@ -46,7 +43,6 @@ export class Scheduler {
     this.recoveryManager = new RecoveryManager(
       this.leaseManager,
       this.jobRepository,
-      this.eventBus,
       options.recoveryInterval ?? 5_000
     );
 
@@ -69,23 +65,5 @@ export class Scheduler {
     await this.runtime.stop();
   }
 
-  /**
-   * Subscribe to scheduler events.
-   */
-  on<T>(
-    event: string,
-    listener: (payload: T) => void | Promise<void>
-  ): void {
-    this.eventBus.on(event as any, listener);
-  }
-
-  /**
-   * Remove a listener.
-   */
-  off<T>(
-    event: string,
-    listener: (payload: T) => void | Promise<void>
-  ): void {
-    this.eventBus.off(event as any, listener);
-  }
+ 
 }

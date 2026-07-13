@@ -1,8 +1,7 @@
 import { JobRepository } from "@reliable-job-queue/database";
 import { LeaseManager } from "../lease/LeaseManager";
 
-import { EventBus } from "../events/EventBus";
-import { QueueEvent } from "../events/QueueEvents";
+
 
 export class RecoveryManager {
   private timer?: NodeJS.Timeout;
@@ -10,7 +9,7 @@ export class RecoveryManager {
   constructor(
     private readonly leaseManager: LeaseManager,
     private readonly jobRepository: JobRepository,
-    private readonly eventBus: EventBus,
+
     private readonly intervalMs = 5000
   ) {}
 
@@ -53,7 +52,6 @@ export class RecoveryManager {
 
       console.log("Recovered:", job.id);
 
-      this.eventBus.emit(QueueEvent.JOB_RECOVERED, { job });
     }
   }
 }

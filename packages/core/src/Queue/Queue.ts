@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-
 import {
     JobAttemptRepository,
   JobRepository,
@@ -17,11 +16,6 @@ import { QueueOptions } from "../types/QueueOptions";
 import { WorkerOptions } from "../types/WorkerOptions";
 import { EnqueueJobInput } from "../types/EnqueueJobInput";
 
-import { EventBus } from "../events/EventBus";
-import { QueueEvent } from "../events/QueueEvents";
-
-import { MetricsCollector } from "../metrics/MetricsCollector";
-import { MetricsSnapshot } from "../metrics/MetricSnapshot";
 
 import type { Job, RetryStrategy } from "@reliable-job-queue/shared";
 
@@ -31,15 +25,7 @@ export class Queue {
   private readonly workerRepository: WorkerRepository;
   private readonly handlerRegistry: HandlerRegistry;
 
-  /**
-   * Shared event bus for this queue instance.
-   */
-  private readonly eventBus: EventBus;
 
-  /**
-   * Runtime metrics collector.
-   */
-  private readonly metricsCollector: MetricsCollector;
 
   private readonly workerId: string;
   private readonly workerOptions: WorkerOptions;
@@ -52,14 +38,6 @@ export class Queue {
     this.workerRepository = new WorkerRepository();
     this.handlerRegistry = new HandlerRegistry();
     this.jobAttemptRepository = new JobAttemptRepository();
-
-    this.eventBus = new EventBus();
-
-    this.metricsCollector = new MetricsCollector(
-      this.eventBus
-    );
-
-    this.metricsCollector.start();
 
     this.workerId =
       options.workerId ?? crypto.randomUUID();
@@ -82,25 +60,8 @@ export class Queue {
     this.handlerRegistry.register(type, handler);
   }
 
-  /**
-   * Subscribe to queue events.
-   */
-  public on<T>(
-    event: QueueEvent,
-    listener: (payload: T) => void | Promise<void>
-  ): void {
-    this.eventBus.on(event, listener);
-  }
 
-  /**
-   * Remove an event listener.
-   */
-  public off<T>(
-    event: QueueEvent,
-    listener: (payload: T) => void | Promise<void>
-  ): void {
-    this.eventBus.off(event, listener);
-  }
+ 
 
   /**
    * Enqueue a new job.
@@ -160,7 +121,6 @@ export class Queue {
         this.workerId,
         this.workerOptions,
         this.retryStrategy,
-        this.eventBus
       );
 
     await this.workerRuntime.start();
@@ -179,12 +139,6 @@ export class Queue {
     this.workerRuntime = undefined;
   }
 
-  /**
-   * Runtime metrics.
-   */
-  public metrics(): MetricsSnapshot {
-    return this.metricsCollector.getSnapshot();
-  }
 
   /**
    * Queue statistics.
@@ -217,39 +171,5 @@ export class Queue {
     return this.jobRepository.replayDLQJob(jobId);
   }
 
-  // -------------------------------------------------
-  // Internal getters
-  // -------------------------------------------------
-
-  private getJobRepository(): JobRepository {
-    return this.jobRepository;
-  }
-
-  private getWorkerRepository(): WorkerRepository {
-    return this.workerRepository;
-  }
-
-  private getHandlerRegistry(): HandlerRegistry {
-    return this.handlerRegistry;
-  }
-
-  private getWorkerId(): string {
-    return this.workerId;
-  }
-
-  private getWorkerOptions(): WorkerOptions {
-    return this.workerOptions;
-  }
-
-  private getRetryStrategy(): RetryStrategy {
-    return this.retryStrategy;
-  }
-
-  private getEventBus(): EventBus {
-    return this.eventBus;
-  }
-
-  private getMetricsCollector(): MetricsCollector {
-    return this.metricsCollector;
-  }
+ 
 }

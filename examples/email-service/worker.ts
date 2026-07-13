@@ -1,4 +1,4 @@
-import { QueueEvent } from "../../packages/core/src/events/QueueEvents";
+
 import { Queue } from "../../packages/core/src/queue/Queue";
 import type { WorkerOptions } from "../../packages/core/src/types/WorkerOptions";
 
@@ -23,22 +23,9 @@ async function main() {
   const queue = new Queue({
     worker: options,
   });
-  // console.log(await queue.stats());
-  // console.log(queue.metrics());
-  queue.on(
-    QueueEvent.JOB_STARTED,
-    console.log
-);
+ 
 
-queue.on(
-    QueueEvent.JOB_COMPLETED,
-    console.log
-);
 
-queue.on(
-    QueueEvent.JOB_FAILED,
-    console.log
-);
   // await queue.replay("f69f707f-4c6c-404f-9d16-da158418ffbe");
 //   await queue.enqueue({
 //   queue: "emails",
