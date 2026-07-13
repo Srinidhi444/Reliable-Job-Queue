@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import {
+    JobAttemptRepository,
   JobRepository,
   WorkerRepository,
 } from "@reliable-job-queue/database";
@@ -26,6 +27,7 @@ import type { RetryStrategy } from "@reliable-job-queue/shared";
 
 export class Queue {
   private readonly jobRepository: JobRepository;
+  private readonly jobAttemptRepository: JobAttemptRepository;
   private readonly workerRepository: WorkerRepository;
   private readonly handlerRegistry: HandlerRegistry;
 
@@ -49,6 +51,7 @@ export class Queue {
     this.jobRepository = new JobRepository();
     this.workerRepository = new WorkerRepository();
     this.handlerRegistry = new HandlerRegistry();
+    this.jobAttemptRepository = new JobAttemptRepository();
 
     this.eventBus = new EventBus();
 
@@ -151,6 +154,7 @@ export class Queue {
       new WorkerRuntime(
         this.jobRepository,
         this.workerRepository,
+        this.jobAttemptRepository,
         leaseManager,
         executor,
         this.workerId,

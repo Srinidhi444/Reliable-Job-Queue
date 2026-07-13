@@ -4,6 +4,7 @@ import type { Job, RetryStrategy } from "@reliable-job-queue/shared";
 import {
   JobRepository,
   WorkerRepository,
+  JobAttemptRepository,
 } from "@reliable-job-queue/database";
 
 import { JobExecutor } from "./JobExecutor";
@@ -49,6 +50,7 @@ export class WorkerRuntime {
   constructor(
     private readonly repository: JobRepository,
     private readonly workerRepository: WorkerRepository,
+    private readonly jobAttemptRepository: JobAttemptRepository,
     private readonly leaseManager: LeaseManager,
     private readonly executor: JobExecutor,
     private readonly workerId: string,
@@ -237,12 +239,23 @@ export class WorkerRuntime {
 
     this.heartbeatManager.start(job.id);
 
+    // Attempt number is the job's next attempt (existing attempts + 1)
+    const attemptNumber = job.attempts + 1;
+
+    const attempt = await this.jobAttemptRepository.createAttempt(
+      job.id,
+      this.workerId,
+      attemptNumber
+    );
+
     try {
       this.eventBus.emit(QueueEvent.JOB_STARTED, { job });
 
       await this.executor.execute(job);
 
       await this.repository.completeJob(job.id);
+
+      await this.jobAttemptRepository.completeAttempt(attempt.id);
 
       console.log(`Completed job ${job.id}`);
 
@@ -252,6 +265,11 @@ export class WorkerRuntime {
 
       const errorMessage =
         error instanceof Error ? error.message : String(error);
+
+      await this.jobAttemptRepository.failAttempt(
+        attempt.id,
+        errorMessage
+      );
 
       this.eventBus.emit(QueueEvent.JOB_FAILED, {
         job,
