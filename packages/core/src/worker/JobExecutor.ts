@@ -1,6 +1,6 @@
 import type { Job } from "@reliable-job-queue/shared";
 
-import { HandlerRegistry } from "./HandleRegistry";
+import { HandlerRegistry } from "./HandlerRegistry";
 import type { WorkerContext } from "./WorkerContext";
 
 export class JobExecutor {

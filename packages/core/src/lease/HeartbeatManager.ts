@@ -4,7 +4,21 @@ import { EventBus } from "../events/EventBus";
 import { QueueEvent } from "../events/QueueEvents";
 
 export class HeartbeatManager {
-  private readonly timers = new Map<string, NodeJS.Timeout>();
+  private readonly timers = new Map<
+    string,
+    NodeJS.Timeout
+  >();
+
+  /**
+   * Consecutive heartbeat failures
+   * for each running job.
+   */
+  private readonly failures = new Map<
+    string,
+    number
+  >();
+
+  private static readonly MAX_FAILURES = 3;
 
   constructor(
     private readonly leaseManager: LeaseManager,
@@ -14,40 +28,67 @@ export class HeartbeatManager {
   ) {}
 
   start(jobId: string): void {
-    // Prevent duplicate heartbeats for the same job
     if (this.timers.has(jobId)) {
       return;
     }
 
+    this.failures.set(jobId, 0);
+
     const timer = setInterval(async () => {
       try {
-        const renewed = await this.leaseManager.extendLease(
-          jobId,
-          this.workerId
-        );
+        const renewed =
+          await this.leaseManager.extendLease(
+            jobId,
+            this.workerId
+          );
+
+        if (!renewed) {
+          console.warn(
+            `Lease renewal rejected for job ${jobId}. Stopping heartbeat.`
+          );
+
+          this.stop(jobId);
+          return;
+        }
+
+        // Successful renewal resets failure count.
+        this.failures.set(jobId, 0);
 
         console.log(
-          `[Heartbeat] Job ${jobId} renewed: ${renewed} at ${new Date().toISOString()}`
+          `[Heartbeat] Job ${jobId} renewed at ${new Date().toISOString()}`
         );
 
-        if (renewed) {
-          this.eventBus.emit(QueueEvent.LEASE_RENEWED, {
+        this.eventBus.emit(
+          QueueEvent.LEASE_RENEWED,
+          {
             jobId,
             workerId: this.workerId,
-          });
-        } else {
-          console.warn(
-            `Failed to renew lease for job ${jobId}. Stopping heartbeat.`
+          }
+        );
+      } catch (error) {
+        const failures =
+          (this.failures.get(jobId) ?? 0) + 1;
+
+        this.failures.set(jobId, failures);
+
+        console.error(
+          `Heartbeat failed for job ${jobId} (${failures}/${HeartbeatManager.MAX_FAILURES}):`,
+          error
+        );
+
+        if (
+          failures >=
+          HeartbeatManager.MAX_FAILURES
+        ) {
+          console.error(
+            `Heartbeat permanently stopped for job ${jobId} after ${failures} consecutive failures.`
           );
 
           this.stop(jobId);
         }
-      } catch (error) {
-        console.error(`Heartbeat failed for job ${jobId}:`, error);
       }
     }, this.heartbeatIntervalMs);
 
-    // Don't keep the Node process alive just because of this timer
     timer.unref();
 
     this.timers.set(jobId, timer);
@@ -61,14 +102,17 @@ export class HeartbeatManager {
     }
 
     clearInterval(timer);
+
     this.timers.delete(jobId);
+    this.failures.delete(jobId);
   }
 
   stopAll(): void {
-    for (const [jobId, timer] of this.timers) {
+    for (const timer of this.timers.values()) {
       clearInterval(timer);
     }
 
     this.timers.clear();
+    this.failures.clear();
   }
 }

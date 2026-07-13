@@ -27,7 +27,7 @@ export class RecoveryManager {
       }
     }, this.intervalMs);
 
-    // this.timer.unref();
+    this.timer.unref();
   }
 
   public stop(): void {

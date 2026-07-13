@@ -6,7 +6,7 @@ import {
   WorkerRepository,
 } from "@reliable-job-queue/database";
 
-import { HandlerRegistry } from "../worker/HandleRegistry";
+import { HandlerRegistry } from "../worker/HandlerRegistry";
 import { JobExecutor } from "../worker/JobExecutor";
 import { WorkerRuntime } from "../worker/WorkerRuntime";
 
@@ -23,7 +23,7 @@ import { QueueEvent } from "../events/QueueEvents";
 import { MetricsCollector } from "../metrics/MetricsCollector";
 import { MetricsSnapshot } from "../metrics/MetricSnapshot";
 
-import type { RetryStrategy } from "@reliable-job-queue/shared";
+import type { Job, RetryStrategy } from "@reliable-job-queue/shared";
 
 export class Queue {
   private readonly jobRepository: JobRepository;
@@ -77,7 +77,7 @@ export class Queue {
    */
   register(
     type: string,
-    handler: (job: any) => Promise<void>
+    handler: (job: Job) => Promise<void>
   ): void {
     this.handlerRegistry.register(type, handler);
   }
