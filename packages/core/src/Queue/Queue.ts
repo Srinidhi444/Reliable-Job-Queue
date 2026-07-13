@@ -217,35 +217,35 @@ export class Queue {
   // Internal getters
   // -------------------------------------------------
 
-  getJobRepository(): JobRepository {
+  private getJobRepository(): JobRepository {
     return this.jobRepository;
   }
 
-  getWorkerRepository(): WorkerRepository {
+  private getWorkerRepository(): WorkerRepository {
     return this.workerRepository;
   }
 
-  getHandlerRegistry(): HandlerRegistry {
+  private getHandlerRegistry(): HandlerRegistry {
     return this.handlerRegistry;
   }
 
-  getWorkerId(): string {
+  private getWorkerId(): string {
     return this.workerId;
   }
 
-  getWorkerOptions(): WorkerOptions {
+  private getWorkerOptions(): WorkerOptions {
     return this.workerOptions;
   }
 
-  getRetryStrategy(): RetryStrategy {
+  private getRetryStrategy(): RetryStrategy {
     return this.retryStrategy;
   }
 
-  getEventBus(): EventBus {
+  private getEventBus(): EventBus {
     return this.eventBus;
   }
 
-  getMetricsCollector(): MetricsCollector {
+  private getMetricsCollector(): MetricsCollector {
     return this.metricsCollector;
   }
 }

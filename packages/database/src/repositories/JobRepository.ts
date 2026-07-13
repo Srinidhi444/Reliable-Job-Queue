@@ -110,10 +110,7 @@ export class JobRepository {
     });
   }
 
-  /**
-   * Marks a job as failed.
-   * Retry logic will be added later.
-   */
+ 
   async failJob(jobId: string): Promise<Job> {
     return prisma.job.update({
       where: {
