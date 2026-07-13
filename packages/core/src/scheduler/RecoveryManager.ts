@@ -1,8 +1,6 @@
 import { JobRepository } from "@reliable-job-queue/database";
 import { LeaseManager } from "../lease/LeaseManager";
 
-
-
 export class RecoveryManager {
   private timer?: NodeJS.Timeout;
 

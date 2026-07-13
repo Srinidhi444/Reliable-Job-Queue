@@ -55,7 +55,7 @@ export class Queue {
    */
   register(
     type: string,
-    handler: (job: Job) => Promise<void>
+    handler: (job: any) => Promise<void>
   ): void {
     this.handlerRegistry.register(type, handler);
   }
@@ -66,7 +66,7 @@ export class Queue {
   /**
    * Enqueue a new job.
    */
-  async enqueue(input: EnqueueJobInput) {
+  async enqueue(input: EnqueueJobInput):Promise<Job> {
     const availableAt =
       input.options?.runAt ??
       (input.options?.delay
@@ -149,7 +149,7 @@ export class Queue {
    * Failed
    * DLQ
    */
-  public async stats() {
+  public async stats()  {
     return this.jobRepository.getQueueStats();
   }
 
@@ -157,7 +157,7 @@ export class Queue {
    * Returns all jobs currently
    * in the Dead Letter Queue.
    */
-  public async getDLQ() {
+  public async getDLQ() :Promise<Job[]> {
     return this.jobRepository.getDLQJobs();
   }
 
