@@ -29,6 +29,24 @@ npm install @reliable-job-queue/core
 
 You'll also need PostgreSQL.
 
+## Configuration
+
+The queue reads the database connection string from the `DATABASE_URL` environment variable via Prisma. Prisma commonly uses `url = env("DATABASE_URL")` in the datasource configuration, and the connection string is typically stored in a `.env` file or provided through the runtime environment. [1][2]
+
+```env
+DATABASE_URL="postgresql://postgres:password@localhost:5432/reliable_job_queue"
+```
+
+This keeps setup simple for the current version and matches Prisma's standard environment-variable-based connection pattern. [1][3]
+
+In a future version, an explicit constructor option could be added without breaking existing users:
+
+```ts
+new Queue({
+  connectionString: "postgresql://postgres:password@localhost:5432/reliable_job_queue"
+});
+```
+
 ## Quick Start
 
 ### 1. Create a Queue
