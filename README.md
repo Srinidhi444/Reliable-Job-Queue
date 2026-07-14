@@ -1,159 +1,333 @@
-# Turborepo starter
+# Reliable Job Queue
 
-This Turborepo starter is maintained by the Turborepo core team.
+A lightweight, PostgreSQL-backed background job queue for Node.js with support for durable jobs, retries, delayed execution, priorities, worker leasing, crash recovery, and dead-letter queues.
 
-## Using this example
+Unlike in-memory queues, jobs are persisted in PostgreSQL, allowing them to survive process crashes and restarts.
 
-Run the following command:
+## Features
 
-```sh
-npx create-turbo@latest
+- Durable PostgreSQL-backed job storage
+- Background workers
+- Configurable worker concurrency
+- Delayed and scheduled jobs
+- Priority-based scheduling
+- Automatic retries with exponential backoff
+- Dead Letter Queue (DLQ)
+- Replay failed jobs
+- Visibility timeout (lease-based processing)
+- Automatic lease renewal (heartbeats)
+- Recovery of orphaned jobs after worker crashes
+- Graceful worker shutdown
+- Queue statistics
+- Job execution history
+
+## Installation
+
+```bash
+npm install @reliable-job-queue/core
 ```
 
-## What's inside?
+You'll also need PostgreSQL.
 
-This Turborepo includes the following packages/apps:
+## Quick Start
 
-### Apps and Packages
+### 1. Create a Queue
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
+```ts
+import { Queue } from "@reliable-job-queue/core";
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
-
-### Utilities
-
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo build
+const queue = new Queue();
 ```
 
-Without global `turbo`, use your package manager:
+### 2. Register a Worker
 
-```sh
-cd my-turborepo
-npx turbo build
-npm dlx turbo build
-npm exec turbo build
+```ts
+queue.register("send-email", async (job) => {
+  console.log(job.payload);
+
+  // Send email...
+});
 ```
 
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+### 3. Start the Worker
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo build --filter=docs
+```ts
+await queue.startWorker();
 ```
 
-Without global `turbo`:
+### 4. Enqueue a Job
 
-```sh
-npx turbo build --filter=docs
-npm exec turbo build --filter=docs
-npm exec turbo build --filter=docs
+```ts
+await queue.enqueue({
+  queue: "emails",
+  type: "send-email",
+  payload: {
+    to: "john@example.com",
+    subject: "Welcome",
+    body: "Hello!"
+  }
+});
 ```
 
-### Develop
+## Delayed Jobs
 
-To develop all apps and packages, run the following command:
+Run a job after a delay.
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo dev
+```ts
+await queue.enqueue({
+  queue: "emails",
+  type: "send-email",
+  payload: {...},
+  options: {
+    delay: 30_000
+  }
+});
 ```
 
-Without global `turbo`, use your package manager:
+## Scheduled Jobs
 
-```sh
-cd my-turborepo
-npx turbo dev
-npm exec turbo dev
-npm exec turbo dev
+Execute at a specific time.
+
+```ts
+await queue.enqueue({
+  queue: "emails",
+  type: "send-email",
+  payload: {...},
+  options: {
+    runAt: new Date(Date.now() + 60_000)
+  }
+});
 ```
 
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+## Job Priority
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+Higher priority jobs execute first.
 
-```sh
-turbo dev --filter=web
+```ts
+await queue.enqueue({
+  queue: "emails",
+  type: "send-email",
+  payload: {...},
+  options: {
+    priority: 100
+  }
+});
 ```
 
-Without global `turbo`:
+## Retry Configuration
 
-```sh
-npx turbo dev --filter=web
-npm exec turbo dev --filter=web
-npm exec turbo dev --filter=web
+```ts
+await queue.enqueue({
+  queue: "emails",
+  type: "send-email",
+  payload: {...},
+  options: {
+    maxAttempts: 5
+  }
+});
 ```
 
-### Remote Caching
+Retries use exponential backoff by default.
 
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
+## Worker Configuration
 
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
-
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo login
+```ts
+const queue = new Queue({
+  worker: {
+    concurrency: 5,
+    pollingInterval: 1000,
+    heartbeatInterval: 3000,
+    leaseDuration: 10000
+  }
+});
 ```
 
-Without global `turbo`, use your package manager:
+## Options
 
-```sh
-cd my-turborepo
-npx turbo login
-npm exec turbo login
-npm exec turbo login
+| Option | Default | Description |
+|--------|---------|-------------|
+| `concurrency` | `1` | Number of jobs processed simultaneously |
+| `pollingInterval` | `1000ms` | Database polling interval |
+| `heartbeatInterval` | `10000ms` | Lease renewal interval |
+| `leaseDuration` | `30000ms` | Visibility timeout |
+
+## Dead Letter Queue
+
+Jobs exceeding the retry limit are automatically moved to the Dead Letter Queue.
+
+Retrieve them:
+
+```ts
+const jobs = await queue.getDLQ();
 ```
 
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
+Replay a failed job:
 
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo link
+```ts
+await queue.replay(jobId);
 ```
 
-Without global `turbo`:
+## Queue Statistics
 
-```sh
-npx turbo link
-npm exec turbo link
-npm exec turbo link
+```ts
+const stats = await queue.stats();
 ```
 
-## Useful Links
+Example:
 
-Learn more about the power of Turborepo:
+```json
+{
+  "pending": 10,
+  "processing": 3,
+  "completed": 250,
+  "failed": 0,
+  "dlq": 2
+}
+```
 
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
+## Scheduler
+
+Recovery is handled by a dedicated scheduler process.
+
+```ts
+import { Scheduler } from "@reliable-job-queue/core";
+
+const scheduler = new Scheduler();
+
+await scheduler.start();
+```
+
+The scheduler periodically:
+
+- Detects expired leases
+- Releases abandoned jobs
+- Makes them available for processing again
+
+## Graceful Shutdown
+
+```ts
+process.on("SIGINT", async () => {
+  await queue.stopWorker();
+});
+```
+
+The worker:
+
+- Stops polling
+- Waits for running jobs
+- Stops heartbeats
+- Marks itself offline
+
+## Reliability
+
+### Durable Storage
+
+Jobs are stored in PostgreSQL and survive application restarts.
+
+### Atomic Job Claiming
+
+Workers claim jobs using an atomic database update.
+
+Even if multiple workers attempt to claim the same job simultaneously, only one succeeds.
+
+### Visibility Timeout
+
+When a worker claims a job:
+
+- Status becomes `PROCESSING`
+- A lease is assigned
+- Other workers cannot execute it
+
+### Heartbeats
+
+Long-running jobs periodically renew their lease.
+
+### Crash Recovery
+
+If a worker crashes:
+
+- Lease expires
+- Scheduler detects expired lease
+- Job becomes `PENDING`
+- Another worker processes it
+
+### Dead Letter Queue
+
+Jobs that exceed the configured retry count are moved to the DLQ for inspection and replay.
+
+## Architecture
+
+```text
+Producer
+     │
+     ▼
+ PostgreSQL
+     │
+     ▼
+ Worker
+     │
+     ├── Lease Manager
+     ├── Retry Strategy
+     ├── Heartbeats
+     └── Job Executor
+
+ Scheduler
+     │
+     └── Recovery Manager
+```
+
+## Current Limitations
+
+- PostgreSQL polling (no Redis notifications)
+- At-least-once delivery semantics
+- Job handlers should be idempotent
+- No cron scheduling
+- No web dashboard
+
+## API
+
+### Queue
+
+```ts
+new Queue(options)
+```
+
+#### Methods
+
+- `register(type, handler)`
+- `enqueue(job)`
+- `startWorker()`
+- `stopWorker()`
+- `stats()`
+- `getDLQ()`
+- `replay(jobId)`
+
+### Scheduler
+
+```ts
+new Scheduler()
+```
+
+#### Methods
+
+- `start()`
+- `stop()`
+
+## Example Project
+
+```text
+producer.ts
+    │
+    ▼
+PostgreSQL
+    │
+    ▼
+worker.ts
+    │
+    ▼
+Job Handler
+```
+
+## License
+
+MIT
